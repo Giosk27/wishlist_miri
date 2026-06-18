@@ -75,7 +75,7 @@ export interface AdminMemberRecord {
   group_id: string;
   product_id: string | null;
   product_name: string;
-  auth_user_id: string | null;
+  auth_user_id?: string | null;
   name: string;
   email: string;
   status: string;

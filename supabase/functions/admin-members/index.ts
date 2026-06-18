@@ -89,7 +89,7 @@ Deno.serve(async (req) => {
 
   if (req.method === 'GET') {
     const [membersResponse, groupsResponse, productsResponse] = await Promise.all([
-      supabaseFetch('/rest/v1/members?select=id,group_id,auth_user_id,name,email,status,created_at', serviceRoleKey),
+      supabaseFetch('/rest/v1/members?select=id,group_id,name,email,status,created_at', serviceRoleKey),
       supabaseFetch('/rest/v1/gift_groups?select=id,product_id', serviceRoleKey),
       supabaseFetch('/rest/v1/products?select=id,name', serviceRoleKey),
     ]);
@@ -107,7 +107,6 @@ Deno.serve(async (req) => {
     const members = await membersResponse.json() as Array<{
       id: string;
       group_id: string;
-      auth_user_id: string | null;
       name: string;
       email: string;
       status: string;

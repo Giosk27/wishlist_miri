@@ -69,8 +69,8 @@ export default function AdminPage() {
       const data = await getAdminMembers();
       setMembers(data);
       setSelectedMembers((current) => current.filter((id) => data.some((member) => member.id === id)));
-    } catch {
-      setError('Errore caricamento utenti.');
+    } catch (err) {
+      setError(`Errore caricamento utenti: ${formatError(err)}`);
     } finally {
       setMembersLoading(false);
     }
