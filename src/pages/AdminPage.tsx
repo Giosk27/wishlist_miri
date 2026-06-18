@@ -3,6 +3,8 @@ import Layout from '../components/Layout';
 import Alert from '../components/Alert';
 import {
   getProducts,
+  getAdminMembers,
+  deleteAdminMembers,
   saveProduct,
   deleteProduct,
   clearAllGroupData,
@@ -17,6 +19,7 @@ import {
   verifyAdminPassword,
 } from '../lib/security';
 import type { Product } from '../types';
+import type { AdminMemberRecord } from '../lib/api';
 
 const emptyForm = { name: '', price: '', description: '', image_url: '' };
 
@@ -52,13 +55,32 @@ export default function AdminPage() {
   const [sendEmailChannel, setSendEmailChannel] = useState(true);
   const [sendAppChannel, setSendAppChannel] = useState(true);
   const [sendingAnnouncement, setSendingAnnouncement] = useState(false);
+  const [members, setMembers] = useState<AdminMemberRecord[]>([]);
+  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
 
   const loadProducts = () => {
     getProducts().then(setProducts).catch(() => setError('Errore caricamento prodotti'));
   };
 
+  const loadMembers = async () => {
+    setMembersLoading(true);
+    try {
+      const data = await getAdminMembers();
+      setMembers(data);
+      setSelectedMembers((current) => current.filter((id) => data.some((member) => member.id === id)));
+    } catch {
+      setError('Errore caricamento utenti.');
+    } finally {
+      setMembersLoading(false);
+    }
+  };
+
   useEffect(() => {
-    if (authenticated) loadProducts();
+    if (authenticated) {
+      loadProducts();
+      void loadMembers();
+    }
   }, [authenticated]);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -142,6 +164,25 @@ export default function AdminPage() {
       setMessage('Prodotto eliminato.');
     } catch {
       setError('Errore eliminazione.');
+    }
+  };
+
+  const toggleMember = (id: string) => {
+    setSelectedMembers((current) =>
+      current.includes(id) ? current.filter((memberId) => memberId !== id) : [...current, id],
+    );
+  };
+
+  const handleDeleteMembers = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    if (!confirm(ids.length === 1 ? 'Eliminare questo utente?' : `Eliminare ${ids.length} utenti selezionati?`)) return;
+    try {
+      await deleteAdminMembers(ids);
+      setMessage(ids.length === 1 ? 'Utente eliminato.' : 'Utenti eliminati.');
+      setSelectedMembers([]);
+      await loadMembers();
+    } catch {
+      setError('Errore eliminazione utenti.');
     }
   };
 
@@ -380,6 +421,79 @@ export default function AdminPage() {
             {sendingAnnouncement ? 'Invio...' : 'Invia'}
           </button>
         </form>
+
+        <section className="bg-white/90 rounded-[1.75rem] border border-brand-100 p-5 sm:p-6 space-y-4 shadow-[0_16px_50px_rgba(91,33,182,0.08)]">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="font-semibold text-brand-900">Utenti iscritti ({members.length})</h2>
+              <p className="text-sm text-brand-600">Puoi eliminare una o più persone dal gruppo.</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedMembers(members.map((member) => member.id))}
+                className="px-4 py-2 rounded-xl border border-brand-200 text-brand-700 hover:bg-brand-50 text-sm"
+              >
+                Seleziona tutti
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedMembers([])}
+                className="px-4 py-2 rounded-xl border border-brand-200 text-brand-700 hover:bg-brand-50 text-sm"
+              >
+                Deseleziona
+              </button>
+              <button
+                type="button"
+                disabled={selectedMembers.length === 0}
+                onClick={() => handleDeleteMembers(selectedMembers)}
+                className="px-4 py-2 rounded-xl bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50 text-sm"
+              >
+                Elimina selezionati
+              </button>
+            </div>
+          </div>
+
+          {membersLoading ? (
+            <p className="text-sm text-brand-500">Caricamento utenti...</p>
+          ) : members.length === 0 ? (
+            <p className="text-brand-500">Nessun utente iscritto.</p>
+          ) : (
+            <div className="grid gap-3">
+              {members.map((member) => (
+                <label
+                  key={member.id}
+                  className="flex flex-col gap-3 rounded-2xl border border-brand-100 bg-brand-50/40 p-4 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedMembers.includes(member.id)}
+                      onChange={() => toggleMember(member.id)}
+                      className="mt-1 rounded border-brand-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    <div>
+                      <p className="font-semibold text-brand-900">{member.name}</p>
+                      <p className="text-sm text-brand-600">{member.email}</p>
+                      <p className="text-xs text-brand-500">
+                        {member.product_name || 'Prodotto sconosciuto'} · {member.status}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 self-start sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteMembers([member.id])}
+                      className="px-3 py-2 rounded-xl bg-rose-50 text-rose-700 hover:bg-rose-100 text-sm"
+                    >
+                      Elimina
+                    </button>
+                  </div>
+                </label>
+              ))}
+            </div>
+          )}
+        </section>
 
         <form onSubmit={handleSubmit} className="bg-white/90 rounded-[1.75rem] border border-brand-100 p-5 sm:p-6 space-y-4 shadow-[0_16px_50px_rgba(91,33,182,0.08)]">
           <h2 className="font-semibold text-brand-900">{editingId ? 'Modifica prodotto' : 'Nuovo prodotto'}</h2>

@@ -70,6 +70,18 @@ function buildPublicGroupViews(
 
 export type AnnouncementScope = 'all' | 'product';
 
+export interface AdminMemberRecord {
+  id: string;
+  group_id: string;
+  product_id: string | null;
+  product_name: string;
+  auth_user_id: string | null;
+  name: string;
+  email: string;
+  status: string;
+  created_at: string;
+}
+
 export interface AdminBroadcastOptions {
   scope: AnnouncementScope;
   productId: string | null;
@@ -656,6 +668,57 @@ async function sbSendAdminBroadcast(options: AdminBroadcastOptions): Promise<{ e
   return response.json() as Promise<{ emailCount: number; appCount: number }>;
 }
 
+async function sbGetAdminMembers(): Promise<AdminMemberRecord[]> {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const token = getAdminSessionToken();
+  if (!supabaseUrl || !supabaseAnonKey || !token) {
+    throw new Error('Admin authentication missing.');
+  }
+
+  const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/admin-members`, {
+    method: 'GET',
+    headers: {
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${token}`,
+      'x-client-info': 'wishlist-site',
+    },
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Admin members fetch failed: ${response.status} ${details}`);
+  }
+
+  const data = await response.json() as { members: AdminMemberRecord[] };
+  return data.members ?? [];
+}
+
+async function sbDeleteAdminMembers(memberIds: string[]): Promise<void> {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const token = getAdminSessionToken();
+  if (!supabaseUrl || !supabaseAnonKey || !token) {
+    throw new Error('Admin authentication missing.');
+  }
+
+  const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/admin-members`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${token}`,
+      'x-client-info': 'wishlist-site',
+    },
+    body: JSON.stringify({ memberIds }),
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Admin members delete failed: ${response.status} ${details}`);
+  }
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 export const useSupabase = isSupabaseConfigured;
@@ -727,6 +790,15 @@ export async function sendAdminAnnouncement(
   return useSupabase
     ? sbSendAdminBroadcast(options)
     : localSendAdminBroadcast(options);
+}
+
+export async function getAdminMembers(): Promise<AdminMemberRecord[]> {
+  return useSupabase ? sbGetAdminMembers() : [];
+}
+
+export async function deleteAdminMembers(memberIds: string[]): Promise<void> {
+  if (!useSupabase) return;
+  return sbDeleteAdminMembers(memberIds);
 }
 
 export async function setPurchased(groupId: string, sessionToken: string, purchased: boolean): Promise<boolean> {

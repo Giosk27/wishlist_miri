@@ -16,7 +16,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [permissionState, setPermissionState] = useState<NotificationPermission>(
     typeof Notification !== 'undefined' ? Notification.permission : 'default',
   );
-  const [notificationHint, setNotificationHint] = useState('');
 
   const isIos =
     typeof navigator !== 'undefined' &&
@@ -68,32 +67,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }, [notifications]);
 
   const enableNotifications = async () => {
-    setNotificationHint('');
     if (typeof Notification === 'undefined') {
-      setNotificationHint(
-        isIos
-          ? 'Su iPhone le notifiche web funzionano meglio dopo aver aggiunto il sito alla schermata Home.'
-          : 'Il browser non supporta le notifiche web in questa modalità.',
-      );
       return;
     }
 
     try {
       const permission = await Notification.requestPermission();
       setPermissionState(permission);
-      if (permission === 'granted') {
-        setNotificationHint('Notifiche attivate correttamente.');
-      } else if (permission === 'denied') {
-        setNotificationHint('Le notifiche sono state bloccate dal browser.');
-      } else if (isIos && !isStandalone) {
-        setNotificationHint('Su iPhone prova ad aprire il sito dalla schermata Home: lì le notifiche sono molto più affidabili.');
-      }
     } catch {
-      setNotificationHint(
-        isIos
-          ? 'Su iPhone prova ad aprire il sito dalla schermata Home e poi riattiva le notifiche.'
-          : 'Non sono riuscito ad aprire il prompt notifiche del browser.',
-      );
+      // Nessun messaggio tecnico: su iPhone le notifiche funzionano meglio come web app.
     }
   };
 
@@ -146,13 +128,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   >
                     Attiva notifiche
                   </button>
-                  {notificationHint && <p className="text-sm text-brand-700">{notificationHint}</p>}
                 </div>
               )}
             </div>
             {isIos && !isStandalone && permissionState !== 'granted' && (
               <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                Su iPhone apri il sito in Safari e aggiungilo alla schermata Home, poi riaprilo da lì per usare al meglio le notifiche.
+                Per un’esperienza ottimale su iPhone, aggiungi la pagina alla schermata Home e riaprila da lì.
               </p>
             )}
             <div className="mt-4 grid gap-3">

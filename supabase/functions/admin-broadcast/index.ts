@@ -121,12 +121,17 @@ async function getRecipientEmails(payload: BroadcastPayload, serviceRoleKey: str
 
 async function sendMail(to: string, subject: string, html: string): Promise<void> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceRoleKey = Deno.env.get('SERVICE_ROLE_KEY');
   if (!supabaseUrl) throw new Error('Missing SUPABASE_URL');
+  if (!serviceRoleKey) throw new Error('Missing SERVICE_ROLE_KEY');
 
   const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/send-mail`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      'x-client-info': 'wishlist-admin-broadcast',
     },
     body: JSON.stringify({ to, subject, html }),
   });
