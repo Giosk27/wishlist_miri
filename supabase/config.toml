@@ -3,3 +3,15 @@ verify_jwt = false
 
 [functions.admin-broadcast]
 verify_jwt = false
+
+[functions.admin-notifications]
+verify_jwt = false
+
+[functions.admin-auth]
+verify_jwt = false
+
+[functions.send-mail]
+verify_jwt = false
+
+[functions.push-subscriptions]
+verify_jwt = false
