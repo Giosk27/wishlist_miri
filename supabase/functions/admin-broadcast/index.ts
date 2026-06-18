@@ -1,3 +1,5 @@
+import webpush from 'npm:web-push';
+
 const encoder = new TextEncoder();
 
 function fromBase64Url(input: string): Uint8Array {
@@ -40,7 +42,7 @@ async function verifyAdminToken(token: string, secret: string): Promise<boolean>
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-api-version',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-api-version, x-admin-token',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
@@ -142,6 +144,62 @@ async function sendMail(to: string, subject: string, html: string): Promise<void
   }
 }
 
+async function getPushSubscriptions(serviceRoleKey: string): Promise<Array<{ endpoint: string; auth: string; p256dh: string; expiration_time: string | null }>> {
+  const response = await supabaseFetch('/rest/v1/push_subscriptions?select=endpoint,auth,p256dh,expiration_time', serviceRoleKey);
+  if (!response.ok) {
+    throw new Error(`Failed to load push subscriptions: ${response.status}`);
+  }
+  return await response.json() as Array<{ endpoint: string; auth: string; p256dh: string; expiration_time: string | null }>;
+}
+
+async function deletePushSubscription(endpoint: string, serviceRoleKey: string): Promise<void> {
+  await supabaseFetch(`/rest/v1/push_subscriptions?endpoint=eq.${encodeURIComponent(endpoint)}`, serviceRoleKey, {
+    method: 'DELETE',
+  });
+}
+
+async function sendPushNotifications(subject: string, body: string, serviceRoleKey: string): Promise<number> {
+  const vapidPublicKey = Deno.env.get('VAPID_PUBLIC_KEY');
+  const vapidPrivateKey = Deno.env.get('VAPID_PRIVATE_KEY');
+  const vapidSubject = Deno.env.get('VAPID_SUBJECT') ?? 'mailto:admin@example.com';
+  if (!vapidPublicKey || !vapidPrivateKey) {
+    throw new Error('Missing VAPID_PUBLIC_KEY or VAPID_PRIVATE_KEY');
+  }
+
+  webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
+
+  const subscriptions = await getPushSubscriptions(serviceRoleKey);
+  const results = await Promise.allSettled(subscriptions.map(async (subscription) => {
+    try {
+      await webpush.sendNotification(
+        {
+          endpoint: subscription.endpoint,
+          keys: {
+            auth: subscription.auth,
+            p256dh: subscription.p256dh,
+          },
+        },
+        JSON.stringify({
+          title: subject,
+          body,
+          url: './#/',
+        }),
+      );
+      return true;
+    } catch (error) {
+      const statusCode = typeof error === 'object' && error !== null && 'statusCode' in error
+        ? Number((error as { statusCode?: number }).statusCode)
+        : 0;
+      if (statusCode === 404 || statusCode === 410) {
+        await deletePushSubscription(subscription.endpoint, serviceRoleKey);
+      }
+      return false;
+    }
+  }));
+
+  return results.reduce((count, result) => count + (result.status === 'fulfilled' && result.value ? 1 : 0), 0);
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405);
@@ -153,8 +211,7 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'Missing server secrets' }, 500);
   }
 
-  const authHeader = req.headers.get('Authorization') ?? '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : '';
+  const token = req.headers.get('x-admin-token') ?? '';
   if (!token || !(await verifyAdminToken(token, adminSecret))) {
     return jsonResponse({ error: 'Unauthorized' }, 401);
   }
@@ -185,6 +242,7 @@ Deno.serve(async (req) => {
     return recipients.length;
   })() : 0;
 
+  let pushCount = 0;
   if (payload.sendApp) {
     const insertResponse = await supabaseFetch('/rest/v1/app_notifications', serviceRoleKey, {
       method: 'POST',
@@ -199,11 +257,13 @@ Deno.serve(async (req) => {
       const details = await insertResponse.text();
       return jsonResponse({ error: `Failed to store notification: ${insertResponse.status} ${details}` }, 500);
     }
+    pushCount = await sendPushNotifications(payload.subject.trim(), payload.body.trim(), serviceRoleKey);
   }
 
   return jsonResponse({
     ok: true,
     emailCount,
     appCount: payload.sendApp ? 1 : 0,
+    pushCount,
   });
 });

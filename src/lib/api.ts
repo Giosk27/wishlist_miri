@@ -91,6 +91,17 @@ export interface AdminBroadcastOptions {
   sendApp: boolean;
 }
 
+export interface AdminBroadcastResult {
+  emailCount: number;
+  appCount: number;
+  pushCount: number;
+}
+
+export interface AdminNotificationClearOptions {
+  scope: AnnouncementScope;
+  productId: string | null;
+}
+
 async function localGetAnnouncementRecipients(scope: AnnouncementScope, productId?: string): Promise<string[]> {
   const data = loadLocal();
   const groupIds = scope === 'product'
@@ -157,7 +168,15 @@ async function localStoreNotification(options: {
   saveLocal(data);
 }
 
-async function localSendAdminBroadcast(options: AdminBroadcastOptions): Promise<{ emailCount: number; appCount: number }> {
+async function localClearNotifications(options: AdminNotificationClearOptions): Promise<void> {
+  const data = loadLocal();
+  data.notifications = options.scope === 'all'
+    ? []
+    : data.notifications.filter((notification) => notification.target_product_id !== options.productId);
+  saveLocal(data);
+}
+
+async function localSendAdminBroadcast(options: AdminBroadcastOptions): Promise<AdminBroadcastResult> {
   const emailCount = options.sendEmail
     ? await sendAnnouncementToRecipients(
         await localGetAnnouncementRecipients(options.scope, options.productId ?? undefined),
@@ -167,6 +186,7 @@ async function localSendAdminBroadcast(options: AdminBroadcastOptions): Promise<
     : 0;
 
   const appCount = options.sendApp ? 1 : 0;
+  const pushCount = 0;
   if (options.sendApp) {
     await localStoreNotification({
       scope: options.scope,
@@ -176,7 +196,7 @@ async function localSendAdminBroadcast(options: AdminBroadcastOptions): Promise<
     });
   }
 
-  return { emailCount, appCount };
+  return { emailCount, appCount, pushCount };
 }
 
 // ─── Local storage implementation ───────────────────────────────────────────
@@ -641,7 +661,7 @@ async function sbGetNotifications(scope: AnnouncementScope, productId?: string |
   return (data ?? []).filter((notification) => scope === 'all' || notification.target_product_id === productId);
 }
 
-async function sbSendAdminBroadcast(options: AdminBroadcastOptions): Promise<{ emailCount: number; appCount: number }> {
+async function sbSendAdminBroadcast(options: AdminBroadcastOptions): Promise<AdminBroadcastResult> {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
   const token = getAdminSessionToken();
@@ -654,7 +674,8 @@ async function sbSendAdminBroadcast(options: AdminBroadcastOptions): Promise<{ e
     headers: {
       'Content-Type': 'application/json',
       apikey: supabaseAnonKey,
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${supabaseAnonKey}`,
+      'x-admin-token': token,
       'x-client-info': 'wishlist-site',
     },
     body: JSON.stringify(options),
@@ -665,7 +686,33 @@ async function sbSendAdminBroadcast(options: AdminBroadcastOptions): Promise<{ e
     throw new Error(`Admin broadcast failed: ${response.status} ${details}`);
   }
 
-  return response.json() as Promise<{ emailCount: number; appCount: number }>;
+  return response.json() as Promise<AdminBroadcastResult>;
+}
+
+async function sbClearAdminNotifications(options: AdminNotificationClearOptions): Promise<void> {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const token = getAdminSessionToken();
+  if (!supabaseUrl || !supabaseAnonKey || !token) {
+    throw new Error('Admin authentication missing.');
+  }
+
+  const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/admin-notifications`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${supabaseAnonKey}`,
+      'x-admin-token': token,
+      'x-client-info': 'wishlist-site',
+    },
+    body: JSON.stringify(options),
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Admin notifications clear failed: ${response.status} ${details}`);
+  }
 }
 
 async function sbGetAdminMembers(): Promise<AdminMemberRecord[]> {
@@ -680,7 +727,8 @@ async function sbGetAdminMembers(): Promise<AdminMemberRecord[]> {
     method: 'GET',
     headers: {
       apikey: supabaseAnonKey,
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${supabaseAnonKey}`,
+      'x-admin-token': token,
       'x-client-info': 'wishlist-site',
     },
   });
@@ -707,7 +755,8 @@ async function sbDeleteAdminMembers(memberIds: string[]): Promise<void> {
     headers: {
       'Content-Type': 'application/json',
       apikey: supabaseAnonKey,
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${supabaseAnonKey}`,
+      'x-admin-token': token,
       'x-client-info': 'wishlist-site',
     },
     body: JSON.stringify({ memberIds }),
@@ -786,10 +835,14 @@ export async function clearGroupDataForProduct(productId: string): Promise<void>
 
 export async function sendAdminAnnouncement(
   options: AdminBroadcastOptions,
-): Promise<{ emailCount: number; appCount: number }> {
+): Promise<AdminBroadcastResult> {
   return useSupabase
     ? sbSendAdminBroadcast(options)
     : localSendAdminBroadcast(options);
+}
+
+export async function clearAdminNotifications(options: AdminNotificationClearOptions): Promise<void> {
+  return useSupabase ? sbClearAdminNotifications(options) : localClearNotifications(options);
 }
 
 export async function getAdminMembers(): Promise<AdminMemberRecord[]> {

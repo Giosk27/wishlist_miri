@@ -1,0 +1,5 @@
+[functions.admin-members]
+verify_jwt = false
+
+[functions.admin-broadcast]
+verify_jwt = false

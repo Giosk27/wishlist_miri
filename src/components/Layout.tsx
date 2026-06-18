@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { getAppNotifications } from '../lib/api';
+import { getCurrentAuthUser } from '../lib/auth';
+import { subscribeToPushNotifications } from '../lib/push';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import type { AppNotification } from '../types';
 
 const links = [
@@ -13,6 +16,10 @@ const NOTIFICATION_KEY = 'wishlist_seen_app_notifications';
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [authUser, setAuthUser] = useState<{ id: string; email: string | null } | null>(null);
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
+  const [pushMessage, setPushMessage] = useState('');
   const [permissionState, setPermissionState] = useState<NotificationPermission>(
     typeof Notification !== 'undefined' ? Notification.permission : 'default',
   );
@@ -24,6 +31,41 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const isStandalone =
     typeof window !== 'undefined' &&
     window.matchMedia('(display-mode: standalone)').matches;
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return;
+    let mounted = true;
+    getCurrentAuthUser().then((user) => {
+      if (mounted) setAuthUser(user);
+    }).catch(() => {
+      if (mounted) setAuthUser(null);
+    });
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUser(session?.user ? { id: session.user.id, email: session.user.email ?? null } : null);
+    });
+    return () => {
+      mounted = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const syncSubscription = async () => {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        if (!cancelled) setPushSubscribed(!!subscription);
+      } catch {
+        if (!cancelled) setPushSubscribed(false);
+      }
+    };
+    void syncSubscription();
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname]);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,15 +109,25 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }, [notifications]);
 
   const enableNotifications = async () => {
+    setPushMessage('');
+    if (!authUser) {
+      setPushMessage('Accedi da “Il mio gruppo” per attivare le notifiche push.');
+      return;
+    }
     if (typeof Notification === 'undefined') {
       return;
     }
 
+    setPushLoading(true);
     try {
-      const permission = await Notification.requestPermission();
-      setPermissionState(permission);
+      await subscribeToPushNotifications();
+      setPushSubscribed(true);
+      setPermissionState(Notification.permission);
+      setPushMessage('Notifiche push attive.');
     } catch {
-      // Nessun messaggio tecnico: su iPhone le notifiche funzionano meglio come web app.
+      setPushMessage('Non è stato possibile attivare le notifiche push.');
+    } finally {
+      setPushLoading(false);
     }
   };
 
@@ -120,17 +172,24 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-500">Notifiche web</p>
                 <h2 className="font-display text-xl font-semibold text-brand-900">Ultimi aggiornamenti</h2>
               </div>
-              {permissionState !== 'granted' && (
+              {!pushSubscribed && (
                 <div className="flex flex-col gap-2">
                   <button
+                    disabled={pushLoading || !authUser}
                     onClick={enableNotifications}
                     className="self-start rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
                   >
-                    Attiva notifiche
+                    {pushLoading ? 'Attivazione...' : 'Attiva notifiche push'}
                   </button>
                 </div>
               )}
             </div>
+            {pushMessage && <p className="mt-2 text-sm text-brand-700">{pushMessage}</p>}
+            {!authUser && (
+              <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                Per attivare le notifiche push devi prima accedere dalla sezione “Il mio gruppo”.
+              </p>
+            )}
             {isIos && !isStandalone && permissionState !== 'granted' && (
               <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                 Per un’esperienza ottimale su iPhone, aggiungi la pagina alla schermata Home e riaprila da lì.

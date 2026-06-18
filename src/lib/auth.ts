@@ -13,6 +13,12 @@ export async function getCurrentAuthUser(): Promise<AuthUser | null> {
   return { id: user.id, email: user.email ?? null };
 }
 
+export async function getCurrentAuthAccessToken(): Promise<string | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token ?? null;
+}
+
 export async function signInWithPassword(email: string, password: string): Promise<string | null> {
   if (!isSupabaseConfigured || !supabase) return null;
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });

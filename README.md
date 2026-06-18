@@ -173,6 +173,7 @@ Per passare a una gestione davvero server-side, il consiglio è usare **Supabase
 - Le password devono essere gestite da Supabase Auth: nel database resta solo l'hash, non la password in chiaro.
 - Le tabelle dati devono essere protette con RLS e policy basate sull'utente autenticato.
 - La sezione `Il mio gruppo` diventa una **User Section** con accesso autenticato, profilo e gruppo collegato all'account.
+- Le notifiche push vere richiedono un service worker, una subscription salvata in Supabase e i secret VAPID.
 
 Per l’ordine operativo usa `CHECKLIST.md`.
 
@@ -180,10 +181,11 @@ Per l’ordine operativo usa `CHECKLIST.md`.
 
 - Creare `ADMIN_PASSWORD` e `ADMIN_JWT_SECRET` come secrets Supabase.
 - Tenere `SERVICE_ROLE_KEY` solo lato server.
-- Deployare `admin-auth` e `admin-broadcast`.
-- Verificare che `products`, `gift_groups`, `members`, `app_notifications` abbiano RLS attive.
+- Tenere `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` e `VAPID_SUBJECT` come secrets Supabase.
+- Deployare `admin-auth`, `admin-broadcast` e `push-subscriptions`.
+- Verificare che `products`, `gift_groups`, `members`, `app_notifications`, `push_subscriptions` abbiano RLS attive.
 - Spostare eventuali operazioni distruttive o sensibili dentro Edge Functions.
-- Testare: login admin, upload prodotto, reset gruppi, invio email, invio notifiche app.
+- Testare: login admin, upload prodotto, reset gruppi, invio email, invio notifiche app, invio push.
 
 ### Checklist Utenti
 
@@ -221,8 +223,12 @@ Il pannello admin attuale può già inviare:
 - `ADMIN_JWT_SECRET`
 - `SUPABASE_URL`
 - `SERVICE_ROLE_KEY`
+- `VAPID_PUBLIC_KEY`
+- `VAPID_PRIVATE_KEY`
+- `VAPID_SUBJECT`
 
 La variabile `VITE_ADMIN_PASSWORD` resta utile solo per la modalità demo locale, non per il deploy pubblico.
+Per le push PWA serve anche `VITE_VAPID_PUBLIC_KEY` nel build frontend.
 
 ### Nota importante su "crittatura"
 

@@ -40,7 +40,7 @@ async function verifyAdminToken(token: string, secret: string): Promise<boolean>
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-api-version',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-api-version, x-admin-token',
   'Access-Control-Allow-Methods': 'GET, DELETE, OPTIONS',
 };
 
@@ -81,8 +81,7 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'Missing server secrets' }, 500);
   }
 
-  const authHeader = req.headers.get('Authorization') ?? '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : '';
+  const token = req.headers.get('x-admin-token') ?? '';
   if (!token || !(await verifyAdminToken(token, adminSecret))) {
     return jsonResponse({ error: 'Unauthorized' }, 401);
   }

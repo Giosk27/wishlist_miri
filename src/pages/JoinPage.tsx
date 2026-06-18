@@ -55,22 +55,27 @@ export default function JoinPage() {
       setError('Inserisci un nome valido.');
       return;
     }
-    if (!isValidEmail(email)) {
+    const resolvedEmail = useSupabase ? authUser?.email ?? '' : '';
+    if (useSupabase && !authUser) {
+      setError('Per partecipare devi prima accedere dalla sezione "Il mio gruppo".');
+      return;
+    }
+    if (!useSupabase && !isValidEmail(email)) {
       setError('Inserisci un indirizzo email valido.');
+      return;
+    }
+    if (useSupabase && !isValidEmail(resolvedEmail)) {
+      setError('L’account autenticato non ha un’email valida.');
       return;
     }
 
     setSubmitting(true);
     try {
-      if (useSupabase && !authUser) {
-        setError('Per partecipare devi prima accedere dalla sezione "Il mio gruppo".');
-        return;
-      }
       const result = await joinOrCreateGroup({
         productId,
         groupId,
         name: sanitizePublicName(name),
-        email: useSupabase ? (authUser?.email ?? email.trim().toLowerCase()) : email.trim().toLowerCase(),
+        email: useSupabase ? resolvedEmail.trim().toLowerCase() : email.trim().toLowerCase(),
         authUserId: useSupabase ? authUser?.id ?? null : null,
       });
 
@@ -124,10 +129,19 @@ export default function JoinPage() {
         </div>
 
         {useSupabase && !authUser && (
-          <Alert
-            type="info"
-            message='Per unire il tuo account a questo regalo usa prima "Il mio gruppo" per registrarti o accedere.'
-          />
+          <div className="rounded-[1.5rem] border border-brand-100 bg-white/90 p-6 shadow-[0_14px_40px_rgba(91,33,182,0.08)]">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-brand-500">Accesso richiesto</p>
+            <h2 className="mt-2 font-display text-2xl font-semibold text-brand-900">Per unirti a un gruppo devi essere loggato</h2>
+            <p className="mt-2 text-sm text-brand-600">
+              Entra dalla sezione <span className="font-semibold text-brand-800">Il mio gruppo</span>, accedi o registrati e poi torna qui per partecipare.
+            </p>
+            <Link
+              to="/il-mio-gruppo"
+              className="mt-4 inline-flex rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700"
+            >
+              Vai a Il mio gruppo
+            </Link>
+          </div>
         )}
 
         {existingGroup && (
@@ -137,7 +151,7 @@ export default function JoinPage() {
         {error && <Alert type="error" message={error} />}
         {success && <Alert type="success" message={success} />}
 
-        {!success && (
+        {!success && (!useSupabase || authUser) && (
           <form onSubmit={handleSubmit} className="bg-white/90 rounded-[1.75rem] border border-brand-100 p-6 space-y-4 shadow-[0_16px_50px_rgba(91,33,182,0.08)]">
             <p className="text-sm text-brand-600">
               Il tuo nome sarà visibile sotto il regalo. L'email serve solo per l'accesso al tuo gruppo e per gli aggiornamenti.
@@ -159,17 +173,23 @@ export default function JoinPage() {
             </div>
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-brand-800 mb-1">
-                Email
+                Email account
               </label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-brand-200 focus:outline-none focus:ring-2 focus:ring-brand-400"
-                placeholder="tua@email.it"
-                required
-              />
+              {useSupabase ? (
+                <div className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-700">
+                  {authUser?.email ?? 'Email account non disponibile'}
+                </div>
+              ) : (
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-brand-200 focus:outline-none focus:ring-2 focus:ring-brand-400"
+                  placeholder="tua@email.it"
+                  required
+                />
+              )}
             </div>
             <button
               type="submit"

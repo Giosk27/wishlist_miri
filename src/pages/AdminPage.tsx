@@ -9,6 +9,7 @@ import {
   deleteProduct,
   clearAllGroupData,
   clearGroupDataForProduct,
+  clearAdminNotifications,
   sendAdminAnnouncement,
   uploadProductImage,
   useSupabase,
@@ -48,6 +49,9 @@ export default function AdminPage() {
   const [clearing, setClearing] = useState(false);
   const [clearScope, setClearScope] = useState<'all' | 'product'>('all');
   const [clearProductId, setClearProductId] = useState('');
+  const [clearingNotifications, setClearingNotifications] = useState(false);
+  const [clearNotificationsScope, setClearNotificationsScope] = useState<'all' | 'product'>('all');
+  const [clearNotificationsProductId, setClearNotificationsProductId] = useState('');
   const [announcementScope, setAnnouncementScope] = useState<'all' | 'product'>('all');
   const [announcementProductId, setAnnouncementProductId] = useState('');
   const [announcementSubject, setAnnouncementSubject] = useState('');
@@ -214,6 +218,36 @@ export default function AdminPage() {
     }
   };
 
+  const handleClearNotifications = async () => {
+    if (clearNotificationsScope === 'product' && !clearNotificationsProductId) {
+      setError('Seleziona un prodotto da svuotare.');
+      return;
+    }
+
+    const label =
+      clearNotificationsScope === 'all'
+        ? 'Svuotare tutte le notifiche app/web?'
+        : 'Svuotare solo le notifiche del prodotto selezionato?';
+    if (!confirm(label)) return;
+
+    setClearingNotifications(true);
+    setError('');
+    setMessage('');
+    try {
+      await clearAdminNotifications({
+        scope: clearNotificationsScope,
+        productId: clearNotificationsScope === 'product' ? clearNotificationsProductId : null,
+      });
+      setMessage(clearNotificationsScope === 'all'
+        ? 'Tutte le notifiche sono state eliminate.'
+        : 'Notifiche del prodotto eliminate.');
+    } catch (err) {
+      setError(`Errore durante il reset notifiche: ${formatError(err)}`);
+    } finally {
+      setClearingNotifications(false);
+    }
+  };
+
   const handleSendAnnouncement = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -245,11 +279,12 @@ export default function AdminPage() {
       const parts: string[] = [];
       if (sendEmailChannel) parts.push(`${result.emailCount} email`);
       if (sendAppChannel) parts.push(`${result.appCount} notifica app`);
+      if (result.pushCount > 0) parts.push(`${result.pushCount} push`);
       setMessage(parts.length > 0 ? `Invio completato: ${parts.join(' e ')}.` : 'Invio completato.');
       setAnnouncementSubject('');
       setAnnouncementBody('');
-    } catch {
-      setError('Errore durante l\'invio dell\'annuncio.');
+    } catch (err) {
+      setError(`Errore durante l'invio dell'annuncio: ${formatError(err)}`);
     } finally {
       setSendingAnnouncement(false);
     }
@@ -330,6 +365,39 @@ export default function AdminPage() {
                 className="text-sm px-4 py-2 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50"
               >
                 {clearing ? 'Pulizia...' : 'Svuota'}
+              </button>
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
+                <select
+                  value={clearNotificationsScope}
+                  onChange={(e) => setClearNotificationsScope(e.target.value as 'all' | 'product')}
+                  className="text-sm px-3 py-2 rounded-xl border border-brand-200 bg-white text-brand-700"
+                >
+                  <option value="all">Tutte le notifiche</option>
+                  <option value="product">Solo un prodotto</option>
+                </select>
+                {clearNotificationsScope === 'product' && (
+                  <select
+                    value={clearNotificationsProductId}
+                    onChange={(e) => setClearNotificationsProductId(e.target.value)}
+                    className="text-sm px-3 py-2 rounded-xl border border-brand-200 bg-white text-brand-700"
+                  >
+                    <option value="">Seleziona prodotto</option>
+                    {products.map((product) => (
+                      <option key={product.id} value={product.id}>
+                        {product.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <button
+                onClick={handleClearNotifications}
+                disabled={clearingNotifications}
+                className="text-sm px-4 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+              >
+                {clearingNotifications ? 'Pulizia...' : 'Svuota notifiche'}
               </button>
             </div>
             <button onClick={handleLogout} className="text-sm px-4 py-2 rounded-xl text-brand-500 hover:text-brand-700">
