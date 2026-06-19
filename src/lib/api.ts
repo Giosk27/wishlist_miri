@@ -14,7 +14,8 @@ import {
   calculatePricePerPerson,
   getAdminSessionToken,
 } from './security';
-import { isSupabaseConfigured, supabase, STORAGE_BUCKET } from './supabase';
+import { getCurrentAuthAccessToken } from './auth';
+import { isSupabaseConfigured, supabase } from './supabase';
 import { sendAdminAnnouncementEmail, sendGroupUpdateEmail, getMyGroupUrl } from './email';
 
 const LS_KEY = 'wishlist_data_v1';
@@ -275,6 +276,7 @@ async function localJoinOrCreateGroup(params: {
   data.members.push(member);
   saveLocal(data);
 
+  let warning: string | null = null;
   try {
     const approvedMembers = data.members.filter((m) => m.group_id === group.id && m.status === 'approved');
     const names = approvedMembers.map((m) => m.name);
@@ -289,19 +291,14 @@ async function localJoinOrCreateGroup(params: {
         myGroupUrl: getMyGroupUrl(),
       });
     }
-  } catch (error) {
-    data.members = data.members.filter((m) => m.id !== member.id);
-    if (isNewGroup) {
-      data.groups = data.groups.filter((g) => g.id !== group.id);
-    }
-    saveLocal(data);
-    throw error;
+  } catch {
+    warning = 'Iscrizione completata, ma l’invio della mail di aggiornamento non è riuscito.';
   }
 
   const approvedCount = data.members.filter((m) => m.group_id === group.id && m.status === 'approved').length;
   const pricePerPerson = calculatePricePerPerson(product.price, approvedCount) ?? product.price;
 
-  return { member, isNewGroup, pricePerPerson };
+  return { member, isNewGroup, pricePerPerson, warning };
 }
 
 async function localLoginMember(email: string): Promise<Member | null> {
@@ -352,6 +349,10 @@ async function localLeaveGroup(memberId: string): Promise<boolean> {
   const groupId = member.group_id;
   data.members = data.members.filter((m) => m.id !== memberId);
   if (!data.members.some((m) => m.group_id === groupId)) {
+    const group = data.groups.find((g) => g.id === groupId);
+    if (group) {
+      group.purchased = false;
+    }
     data.groups = data.groups.filter((g) => g.id !== groupId);
   }
   saveLocal(data);
@@ -459,91 +460,41 @@ async function sbJoinOrCreateGroup(params: {
   email: string;
   authUserId?: string | null;
 }): Promise<JoinResult> {
-  const emailHash = await hashEmail(params.email);
-
-  const { data: existing } = await supabase!
-    .from('members')
-    .select('id')
-    .eq('email_hash', emailHash)
-    .maybeSingle();
-
-  if (existing) {
-    throw new Error('Sei già iscritto a un gruppo. Puoi cambiarlo dalla pagina "Il mio gruppo".');
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const accessToken = await getCurrentAuthAccessToken();
+  if (!supabaseUrl || !supabaseAnonKey || !accessToken) {
+    throw new Error('Auth session non disponibile.');
   }
 
-  const product = await sbGetProduct(params.productId);
-  if (!product) throw new Error('Prodotto non trovato');
+  const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/join-group`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${accessToken}`,
+      'x-client-info': 'wishlist-site',
+    },
+    body: JSON.stringify({
+      productId: params.productId,
+      groupId: params.groupId ?? null,
+      name: sanitizePublicName(params.name),
+      email: params.email.trim().toLowerCase(),
+    }),
+  });
 
-  let groupId = params.groupId;
-  let isNewGroup = false;
-
-  if (groupId) {
-  } else {
-    const { data: existingGroup, error: existingError } = await supabase!
-      .from('gift_groups')
-      .select('*')
-      .eq('product_id', params.productId)
-      .maybeSingle();
-    if (existingError) throw existingError;
-    if (existingGroup) {
-      groupId = existingGroup.id;
-    } else {
-      const { data: newGroup, error } = await supabase!
-        .from('gift_groups')
-        .insert({ product_id: params.productId, purchased: false })
-        .select()
-        .single();
-      if (error) throw error;
-      groupId = newGroup.id;
-      isNewGroup = true;
+  if (!response.ok) {
+    let details = '';
+    try {
+      const body = await response.json() as { error?: string };
+      details = body.error ?? '';
+    } catch {
+      details = await response.text();
     }
+    throw new Error(details || `Join group failed: ${response.status}`);
   }
 
-  const memberPayload = {
-    group_id: groupId,
-    auth_user_id: params.authUserId ?? null,
-    name: sanitizePublicName(params.name),
-    email: params.email.trim().toLowerCase(),
-    email_hash: emailHash,
-    status: 'approved',
-    session_token: generateToken(),
-  };
-
-  const { data: member, error: mErr } = await supabase!
-    .from('members')
-    .insert(memberPayload)
-    .select()
-    .single();
-  if (mErr) throw mErr;
-
-  const { data: allMembers } = await supabase!.from('members').select('*').eq('group_id', groupId);
-
-  try {
-    const approvedMembers = (allMembers ?? []).filter((m) => m.status === 'approved');
-    const names = approvedMembers.map((m) => m.name);
-    const pricePerPerson = calculatePricePerPerson(product.price, approvedMembers.length) ?? product.price;
-    for (const currentMember of approvedMembers) {
-      await sendGroupUpdateEmail({
-        to: currentMember.email,
-        memberName: currentMember.name,
-        product,
-        groupMemberNames: names,
-        pricePerPerson,
-        myGroupUrl: getMyGroupUrl(),
-      });
-    }
-  } catch (error) {
-    await supabase!.from('members').delete().eq('id', member.id);
-    if (isNewGroup) {
-      await supabase!.from('gift_groups').delete().eq('id', groupId!);
-    }
-    throw error;
-  }
-
-  const approvedCount = (allMembers ?? []).filter((m) => m.status === 'approved').length;
-  const pricePerPerson = calculatePricePerPerson(product.price, approvedCount) ?? product.price;
-
-  return { member, isNewGroup, pricePerPerson };
+  return response.json() as Promise<JoinResult>;
 }
 
 async function sbLoginMember(email: string): Promise<Member | null> {
@@ -598,6 +549,7 @@ async function sbLeaveGroup(memberId: string): Promise<boolean> {
   await supabase!.from('members').delete().eq('id', memberId);
   const { data: remaining } = await supabase!.from('members').select('id').eq('group_id', groupId);
   if ((remaining ?? []).length === 0) {
+    await supabase!.from('gift_groups').update({ purchased: false }).eq('id', groupId);
     await supabase!.from('gift_groups').delete().eq('id', groupId);
   }
   return true;
@@ -631,28 +583,98 @@ async function sbSetPurchased(groupId: string, sessionToken: string, purchased: 
 }
 
 async function sbSaveProduct(product: Omit<Product, 'id' | 'created_at'>, id?: string): Promise<Product> {
-  if (id) {
-    const { data, error } = await supabase!.from('products').update(product).eq('id', id).select().single();
-    if (error) throw error;
-    return data;
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const token = getAdminSessionToken();
+  if (!supabaseUrl || !supabaseAnonKey || !token) {
+    throw new Error('Admin authentication missing.');
   }
-  const { data, error } = await supabase!.from('products').insert(product).select().single();
-  if (error) throw error;
-  return data;
+
+  const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/admin-products`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${supabaseAnonKey}`,
+      'x-admin-token': token,
+      'x-client-info': 'wishlist-site',
+    },
+    body: JSON.stringify({
+      action: 'upsert',
+      id,
+      product,
+    }),
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Admin products save failed: ${response.status} ${details}`);
+  }
+
+  const payload = await response.json() as { product?: Product | null };
+  if (!payload.product) throw new Error('Admin products save failed: missing product');
+  return payload.product;
 }
 
 async function sbDeleteProduct(id: string): Promise<void> {
-  const { error } = await supabase!.from('products').delete().eq('id', id);
-  if (error) throw error;
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const token = getAdminSessionToken();
+  if (!supabaseUrl || !supabaseAnonKey || !token) {
+    throw new Error('Admin authentication missing.');
+  }
+
+  const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/admin-products`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${supabaseAnonKey}`,
+      'x-admin-token': token,
+      'x-client-info': 'wishlist-site',
+    },
+    body: JSON.stringify({
+      action: 'delete',
+      id,
+    }),
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Admin products delete failed: ${response.status} ${details}`);
+  }
 }
 
 async function sbUploadImage(file: File): Promise<string> {
-  const ext = file.name.split('.').pop() ?? 'jpg';
-  const path = `${uuid()}.${ext}`;
-  const { error } = await supabase!.storage.from(STORAGE_BUCKET).upload(path, file, { upsert: false });
-  if (error) throw error;
-  const { data } = supabase!.storage.from(STORAGE_BUCKET).getPublicUrl(path);
-  return data.publicUrl;
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const token = getAdminSessionToken();
+  if (!supabaseUrl || !supabaseAnonKey || !token) {
+    throw new Error('Admin authentication missing.');
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/admin-upload-image`, {
+    method: 'POST',
+    headers: {
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${supabaseAnonKey}`,
+      'x-admin-token': token,
+      'x-client-info': 'wishlist-site',
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Image upload failed: ${response.status} ${details}`);
+  }
+
+  const payload = await response.json() as { imageUrl?: string };
+  if (!payload.imageUrl) throw new Error('Image upload failed: missing image URL');
+  return payload.imageUrl;
 }
 
 async function sbGetNotifications(scope: AnnouncementScope, productId?: string | null): Promise<AppNotification[]> {

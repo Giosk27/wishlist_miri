@@ -27,6 +27,7 @@ async function verifyAdminToken(token: string, secret: string): Promise<boolean>
 
   const key = await importSecret(secret);
   const signatureBytes = fromBase64Url(signatureSegment);
+
   const valid = await crypto.subtle.verify('HMAC', key, signatureBytes, encoder.encode(payloadSegment));
   if (!valid) return false;
 
@@ -54,18 +55,15 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-async function supabaseFetch(path: string, serviceRoleKey: string, init?: RequestInit): Promise<Response> {
-  const supabaseUrl = Deno.env.get('SUPABASE_URL');
-  if (!supabaseUrl) throw new Error('Missing SUPABASE_URL');
-  return fetch(`${supabaseUrl.replace(/\/$/, '')}${path}`, {
-    ...init,
-    headers: {
-      apikey: serviceRoleKey,
-      Authorization: `Bearer ${serviceRoleKey}`,
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  });
+function getExtension(file: File): string {
+  const fromName = file.name.split('.').pop()?.trim().toLowerCase();
+  if (fromName) return fromName;
+
+  const mimeType = file.type.toLowerCase();
+  if (mimeType.includes('png')) return 'png';
+  if (mimeType.includes('webp')) return 'webp';
+  if (mimeType.includes('gif')) return 'gif';
+  return 'jpg';
 }
 
 Deno.serve(async (req) => {
@@ -79,34 +77,44 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'Missing server secrets' }, 500);
   }
 
-  const token = req.headers.get('x-admin-token') ?? '';
-  if (!token || !(await verifyAdminToken(token, adminSecret))) {
+  const authHeader = req.headers.get('x-admin-token');
+  if (!authHeader || !(await verifyAdminToken(authHeader, adminSecret))) {
     return jsonResponse({ error: 'Unauthorized' }, 401);
   }
 
-  let payload: { scope?: 'all' | 'product'; productId?: string | null };
+  let formData: FormData;
   try {
-    payload = await req.json();
+    formData = await req.formData();
   } catch {
-    return jsonResponse({ error: 'Invalid JSON body' }, 400);
+    return jsonResponse({ error: 'Invalid form data' }, 400);
   }
 
-  if (!payload.scope) {
-    return jsonResponse({ error: 'Missing scope' }, 400);
-  }
-  if (payload.scope === 'product' && !payload.productId) {
-    return jsonResponse({ error: 'Missing productId' }, 400);
+  const fileEntry = formData.get('file');
+  if (!(fileEntry instanceof File)) {
+    return jsonResponse({ error: 'Missing file' }, 400);
   }
 
-  const targetPath = payload.scope === 'all'
-    ? '/rest/v1/app_notifications?id=neq.00000000-0000-0000-0000-000000000000'
-    : `/rest/v1/app_notifications?target_scope=eq.product&target_product_id=eq.${payload.productId}`;
+  const bucket = 'product-images';
+  const fileName = `${crypto.randomUUID()}.${getExtension(fileEntry)}`;
+  const uploadUrl = `${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/${bucket}/${encodeURIComponent(fileName)}`;
 
-  const response = await supabaseFetch(targetPath, serviceRoleKey, { method: 'DELETE' });
-  if (!response.ok) {
-    const details = await response.text();
-    return jsonResponse({ error: `Delete failed: ${response.status} ${details}` }, 500);
+  const uploadResponse = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      'Content-Type': fileEntry.type || 'application/octet-stream',
+      'x-upsert': 'false',
+    },
+    body: await fileEntry.arrayBuffer(),
+  });
+
+  if (!uploadResponse.ok) {
+    const details = await uploadResponse.text();
+    return jsonResponse({ error: `Upload failed: ${uploadResponse.status} ${details}` }, uploadResponse.status);
   }
 
-  return jsonResponse({ ok: true });
+  return jsonResponse({
+    imageUrl: `${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/public/${bucket}/${fileName}`,
+  });
 });

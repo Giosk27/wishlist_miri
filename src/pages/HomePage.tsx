@@ -23,10 +23,10 @@ export default function HomePage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const goJoin = (productId: string, groupId?: string) => {
-    const params = new URLSearchParams({ product: productId });
+  const goProduct = (productId: string, groupId?: string) => {
+    const params = new URLSearchParams();
     if (groupId) params.set('group', groupId);
-    navigate(`/partecipa?${params.toString()}`);
+    navigate(`/prodotto/${productId}${params.toString() ? `?${params.toString()}` : ''}`);
   };
 
   return (
@@ -42,11 +42,11 @@ export default function HomePage() {
               Scegli il tuo regalo di gruppo
             </h1>
             <p className="text-brand-700/80 text-lg">
-              Ogni partecipante può unirsi a un solo gruppo. Scegli un regalo, inserisci nome e email, e contribuisci alla tua parte.
+              Ogni partecipante può unirsi a un solo gruppo. Scegli un regalo, inserisci nome e email.
+              quando acquistate un prodotto ricordatevi di segnarlo come acquistato nella sezione "Il mio gruppo"
             </p>
             <div className="flex flex-wrap justify-center gap-2 pt-2 text-sm">
-              <span className="rounded-full bg-brand-100 px-3 py-1 text-brand-800">Foto prodotti</span>
-              <span className="rounded-full bg-white px-3 py-1 text-brand-700 border border-brand-100">Gruppi visibili</span>
+              <span className="rounded-full bg-white px-3 py-1 text-brand-700 border border-brand-100">i Gruppi sono visibili a tutti</span>
             </div>
           </div>
         </div>
@@ -74,8 +74,8 @@ export default function HomePage() {
                 key={product.id}
                 product={product}
                 groups={groups}
-                onJoinNew={() => goJoin(product.id)}
-                onJoinExisting={(groupId) => goJoin(product.id, groupId)}
+                onOpenProduct={() => goProduct(product.id)}
+                onJoinExisting={(groupId) => goProduct(product.id, groupId)}
               />
             ))}
           </div>

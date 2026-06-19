@@ -10,6 +10,19 @@ interface EmailPayload {
   html: string;
 }
 
+function htmlToText(html: string): string {
+  return html
+    .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -71,14 +84,26 @@ async function sendViaGmail(payload: EmailPayload): Promise<void> {
   }
 
   const accessToken = await getGoogleAccessToken();
+  const boundary = `boundary_${crypto.randomUUID().replace(/-/g, '')}`;
+  const plainText = htmlToText(payload.html);
   const rawMessage = [
     `From: ${from}`,
     `To: ${payload.to}`,
     `Subject: ${payload.subject}`,
     'MIME-Version: 1.0',
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    '',
+    plainText,
+    '',
+    `--${boundary}`,
     'Content-Type: text/html; charset="UTF-8"',
     '',
     payload.html,
+    '',
+    `--${boundary}--`,
   ].join('\r\n');
 
   const encodedMessage = base64UrlEncode(rawMessage);

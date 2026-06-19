@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Alert from '../components/Alert';
 import GroupCard from '../components/GroupCard';
@@ -24,6 +24,10 @@ import { getCurrentAuthUser, signInWithPassword, signOut, signUpWithPassword } f
 import type { PublicGroupView, Product } from '../types';
 
 export default function MyGroupPage() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectTarget = searchParams.get('redirect');
+  const safeRedirectTarget = redirectTarget && redirectTarget.startsWith('/') ? redirectTarget : '';
   const [session, setSession] = useState(getMemberSession());
   const [emailInput, setEmailInput] = useState('');
   const [authUser, setAuthUser] = useState<{ id: string; email: string | null } | null>(null);
@@ -151,6 +155,9 @@ export default function MyGroupPage() {
       } else {
         const currentUser = await getCurrentAuthUser();
         setAuthUser(currentUser);
+        if (currentUser && safeRedirectTarget) {
+          navigate(safeRedirectTarget, { replace: true });
+        }
       }
     } catch {
       setAuthInfo('Errore durante l\'accesso.');
@@ -194,7 +201,8 @@ export default function MyGroupPage() {
       saveMemberSession(newSession);
       setSession(newSession);
       setShowChangeGroup(false);
-      setSuccess(`Gruppo cambiato! Nuovo importo: €${result.pricePerPerson.toFixed(2)} a persona.`);
+      const warning = result.warning ? ` ${result.warning}` : '';
+      setSuccess(`Gruppo cambiato! Nuovo importo: €${result.pricePerPerson.toFixed(2)} a persona.${warning}`);
       await loadView(result.member.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Errore cambio gruppo');

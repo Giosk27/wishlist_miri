@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import JSZip from 'jszip';
 import Layout from '../components/Layout';
 import Alert from '../components/Alert';
 import {
@@ -23,16 +24,136 @@ import type { Product } from '../types';
 import type { AdminMemberRecord } from '../lib/api';
 
 const emptyForm = { name: '', price: '', description: '', image_url: '' };
+type ProductImportRow = {
+  image_filename: string;
+  title: string;
+  price_eur: string;
+  notes?: string;
+  local_image_path?: string;
+};
+
+function prettifyFileName(fileName: string): string {
+  const withoutExtension = fileName.replace(/\.[^.]+$/, '');
+  const cleaned = withoutExtension.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return 'Nuovo prodotto';
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+function normalizeFileName(fileName: string): string {
+  return fileName.replace(/\\/g, '/').split('/').pop()?.toLowerCase().trim() ?? fileName.toLowerCase().trim();
+}
+
+function parseCsvLine(line: string): string[] {
+  const values: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+
+    if (char === '"' && inQuotes && next === '"') {
+      current += '"';
+      index += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (char === ',' && !inQuotes) {
+      values.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  values.push(current.trim());
+  return values;
+}
+
+function parseProductImportCsv(csvText: string): ProductImportRow[] {
+  const lines = csvText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) return [];
+
+  const headers = parseCsvLine(lines[0]).map((header) => header.toLowerCase());
+  const required = ['image_filename', 'title', 'price_eur'];
+  const missing = required.filter((column) => !headers.includes(column));
+  if (missing.length > 0) {
+    throw new Error(`CSV non valido: mancano le colonne ${missing.join(', ')}`);
+  }
+
+  return lines.slice(1).map((line) => {
+    const values = parseCsvLine(line);
+    const row = Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ''])) as Record<string, string>;
+    return {
+      image_filename: row.image_filename ?? '',
+      title: row.title ?? '',
+      price_eur: row.price_eur ?? '',
+      notes: row.notes ?? '',
+      local_image_path: row.local_image_path ?? '',
+    };
+  });
+}
+
+function getImportDescription(row: ProductImportRow): string {
+  const notes = row.notes?.trim();
+  if (notes) return notes;
+  return '';
+}
+
+async function loadZipImageMap(zipFile: File): Promise<Map<string, File>> {
+  const zip = await JSZip.loadAsync(await zipFile.arrayBuffer());
+  const imageMap = new Map<string, File>();
+
+  const entries = Object.values(zip.files).filter((entry) => !entry.dir);
+  for (const entry of entries) {
+    const data = await entry.async('blob');
+    const fileName = entry.name.split('/').pop() ?? entry.name;
+    imageMap.set(normalizeFileName(fileName), new File([data], fileName, { type: data.type || 'image/jpeg' }));
+  }
+
+  return imageMap;
+}
 
 function formatError(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message;
+  const message = err instanceof Error && err.message ? err.message : '';
+  if (message) {
+    if (message.toLowerCase().includes('row-level security')) {
+      return `${message} — controlla che le Edge Function siano redeployate e che i secret service role/admin siano corretti in Supabase.`;
+    }
+    return message;
+  }
   if (typeof err === 'object' && err !== null) {
     const maybeMessage = 'message' in err ? (err as { message?: unknown }).message : undefined;
-    if (typeof maybeMessage === 'string' && maybeMessage) return maybeMessage;
+    if (typeof maybeMessage === 'string' && maybeMessage) {
+      if (maybeMessage.toLowerCase().includes('row-level security')) {
+        return `${maybeMessage} — controlla che le Edge Function siano redeployate e che i secret service role/admin siano corretti in Supabase.`;
+      }
+      return maybeMessage;
+    }
     const maybeDetails = 'details' in err ? (err as { details?: unknown }).details : undefined;
-    if (typeof maybeDetails === 'string' && maybeDetails) return maybeDetails;
+    if (typeof maybeDetails === 'string' && maybeDetails) {
+      if (maybeDetails.toLowerCase().includes('row-level security')) {
+        return `${maybeDetails} — controlla che le Edge Function siano redeployate e che i secret service role/admin siano corretti in Supabase.`;
+      }
+      return maybeDetails;
+    }
   }
   return 'Errore salvataggio prodotto.';
+}
+
+function isUnauthorizedError(err: unknown): boolean {
+  const message = formatError(err);
+  return message.includes('401') || message.toLowerCase().includes('unauthorized');
 }
 
 export default function AdminPage() {
@@ -62,6 +183,9 @@ export default function AdminPage() {
   const [members, setMembers] = useState<AdminMemberRecord[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
+  const [importCsvFile, setImportCsvFile] = useState<File | null>(null);
+  const [importZipFile, setImportZipFile] = useState<File | null>(null);
+  const [importingProducts, setImportingProducts] = useState(false);
 
   const loadProducts = () => {
     getProducts().then(setProducts).catch(() => setError('Errore caricamento prodotti'));
@@ -74,6 +198,12 @@ export default function AdminPage() {
       setMembers(data);
       setSelectedMembers((current) => current.filter((id) => data.some((member) => member.id === id)));
     } catch (err) {
+      if (isUnauthorizedError(err)) {
+        setAdminSession(null);
+        setAuthenticated(false);
+        setLoginError('Sessione admin scaduta: accedi di nuovo.');
+        return;
+      }
       setError(`Errore caricamento utenti: ${formatError(err)}`);
     } finally {
       setMembersLoading(false);
@@ -171,6 +301,75 @@ export default function AdminPage() {
     }
   };
 
+  const handleBulkImport = async () => {
+    if (!importCsvFile) {
+      setError('Seleziona il CSV da importare.');
+      return;
+    }
+
+    if (!importZipFile) {
+      setError('Seleziona lo ZIP con le immagini.');
+      return;
+    }
+
+    setImportingProducts(true);
+    setError('');
+    setMessage('');
+
+    try {
+      const csvText = await importCsvFile.text();
+      const rows = parseProductImportCsv(csvText);
+      if (rows.length === 0) {
+        throw new Error('Il CSV non contiene righe da importare.');
+      }
+
+      const zipImageMap = await loadZipImageMap(importZipFile);
+
+      for (const [index, row] of rows.entries()) {
+        const rowNumber = index + 2;
+        const normalizedImageName = normalizeFileName(row.image_filename);
+        const imageFile = zipImageMap.get(normalizedImageName);
+        if (!imageFile) {
+          throw new Error(`Riga ${rowNumber}: immagine mancante nello ZIP (${row.image_filename}).`);
+        }
+
+        const price = Number.parseFloat(row.price_eur.replace(',', '.'));
+        if (Number.isNaN(price) || price <= 0) {
+          throw new Error(`Riga ${rowNumber}: prezzo non valido (${row.price_eur}).`);
+        }
+
+        let imageUrl: string;
+        try {
+          imageUrl = await uploadProductImage(imageFile);
+        } catch (err) {
+          throw new Error(`Riga ${rowNumber}: upload immagine fallito (${row.image_filename}) - ${formatError(err)}`);
+        }
+
+        try {
+          await saveProduct({
+            name: row.title.trim() || prettifyFileName(row.image_filename),
+            price,
+            description: getImportDescription(row),
+            image_url: imageUrl,
+          });
+        } catch (err) {
+          throw new Error(
+            `Riga ${rowNumber}: salvataggio prodotto fallito (${row.image_filename}) - ${formatError(err)}`,
+          );
+        }
+      }
+
+      setImportCsvFile(null);
+      setImportZipFile(null);
+      loadProducts();
+      setMessage(`Importati ${rows.length} prodotti.`);
+    } catch (err) {
+      setError(`Errore importazione prodotti: ${formatError(err)}`);
+    } finally {
+      setImportingProducts(false);
+    }
+  };
+
   const toggleMember = (id: string) => {
     setSelectedMembers((current) =>
       current.includes(id) ? current.filter((memberId) => memberId !== id) : [...current, id],
@@ -242,6 +441,12 @@ export default function AdminPage() {
         ? 'Tutte le notifiche sono state eliminate.'
         : 'Notifiche del prodotto eliminate.');
     } catch (err) {
+      if (isUnauthorizedError(err)) {
+        setAdminSession(null);
+        setAuthenticated(false);
+        setLoginError('Sessione admin scaduta: accedi di nuovo.');
+        return;
+      }
       setError(`Errore durante il reset notifiche: ${formatError(err)}`);
     } finally {
       setClearingNotifications(false);
@@ -284,6 +489,12 @@ export default function AdminPage() {
       setAnnouncementSubject('');
       setAnnouncementBody('');
     } catch (err) {
+      if (isUnauthorizedError(err)) {
+        setAdminSession(null);
+        setAuthenticated(false);
+        setLoginError('Sessione admin scaduta: accedi di nuovo.');
+        return;
+      }
       setError(`Errore durante l'invio dell'annuncio: ${formatError(err)}`);
     } finally {
       setSendingAnnouncement(false);
@@ -408,6 +619,61 @@ export default function AdminPage() {
 
         {message && <Alert type="success" message={message} onClose={() => setMessage('')} />}
         {error && <Alert type="error" message={error} onClose={() => setError('')} />}
+
+        <section className="bg-white/90 rounded-[1.75rem] border border-brand-100 p-5 sm:p-6 space-y-4 shadow-[0_16px_50px_rgba(91,33,182,0.08)]">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="font-semibold text-brand-900">Import CSV + ZIP prodotti</h2>
+              <p className="text-sm text-brand-600 mt-1">
+                Carica il CSV ordinato e lo ZIP con le immagini abbinate per nome file.
+              </p>
+            </div>
+            <span className="text-xs font-medium rounded-full bg-brand-50 text-brand-700 px-3 py-1 self-start">
+              Sezione rapida
+            </span>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-brand-800 mb-1">CSV prodotti</label>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                onChange={(e) => setImportCsvFile(e.target.files?.[0] ?? null)}
+                className="w-full text-sm text-brand-600"
+              />
+              {importCsvFile && (
+                <p className="mt-2 text-xs text-brand-500">
+                  {importCsvFile.name}
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-brand-800 mb-1">ZIP immagini</label>
+              <input
+                type="file"
+                accept=".zip,application/zip"
+                onChange={(e) => setImportZipFile(e.target.files?.[0] ?? null)}
+                className="w-full text-sm text-brand-600"
+              />
+              {importZipFile && (
+                <p className="mt-2 text-xs text-brand-500">
+                  {importZipFile.name}
+                </p>
+              )}
+            </div>
+          </div>
+          <p className="text-xs text-brand-500">
+            Il CSV deve contenere almeno le colonne <span className="font-medium">image_filename</span>, <span className="font-medium">title</span> e <span className="font-medium">price_eur</span>.
+          </p>
+          <button
+            type="button"
+            onClick={handleBulkImport}
+            disabled={importingProducts}
+            className="px-6 py-3 rounded-2xl bg-brand-600 text-white font-semibold hover:bg-brand-700 disabled:opacity-50 shadow-sm"
+          >
+            {importingProducts ? 'Importazione...' : 'Importa prodotti'}
+          </button>
+        </section>
 
         <form onSubmit={handleSendAnnouncement} className="bg-white/90 rounded-[1.75rem] border border-brand-100 p-5 sm:p-6 space-y-4 shadow-[0_16px_50px_rgba(91,33,182,0.08)]">
           <h2 className="font-semibold text-brand-900">Invia annuncio</h2>

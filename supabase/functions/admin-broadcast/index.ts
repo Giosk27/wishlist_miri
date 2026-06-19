@@ -76,9 +76,18 @@ function escapeHtml(input: string): string {
 
 function buildAnnouncementHtml(subject: string, body: string): string {
   return `
-    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #4c1d95;">
-      <h2 style="margin: 0 0 16px;">${escapeHtml(subject)}</h2>
-      <p>${escapeHtml(body).replace(/\n/g, '<br>')}</p>
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; background:#faf5ff; padding:24px;">
+      <div style="max-width:620px; margin:0 auto; background:#fff; border:1px solid #e9d5ff; border-radius:20px; overflow:hidden;">
+        <div style="background:linear-gradient(135deg,#7c3aed,#c084fc); padding:24px; color:#fff;">
+          <div style="font-size:20px; font-weight:700;">Wishlist · Regalo di gruppo</div>
+        </div>
+        <div style="padding:24px;">
+          <h2 style="margin:0 0 12px; font-size:24px; color:#4c1d95;">${escapeHtml(subject)}</h2>
+          <p style="margin:0; white-space:pre-line; color:#4c1d95;">${escapeHtml(body)}</p>
+          <hr style="border:none; border-top:1px solid #e9d5ff; margin:24px 0;" />
+          <p style="margin:0; font-size:12px; color:#7c3aed;">Messaggio inviato dal pannello amministratore.</p>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -123,7 +132,7 @@ async function getRecipientEmails(payload: BroadcastPayload, serviceRoleKey: str
 
 async function sendMail(to: string, subject: string, html: string): Promise<void> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
-  const serviceRoleKey = Deno.env.get('SERVICE_ROLE_KEY');
+  const serviceRoleKey = Deno.env.get('SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   if (!supabaseUrl) throw new Error('Missing SUPABASE_URL');
   if (!serviceRoleKey) throw new Error('Missing SERVICE_ROLE_KEY');
 
@@ -204,8 +213,8 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405);
 
-  const adminSecret = Deno.env.get('ADMIN_JWT_SECRET');
-  const serviceRoleKey = Deno.env.get('SERVICE_ROLE_KEY');
+  const adminSecret = Deno.env.get('ADMIN_JWT_SECRET') ?? Deno.env.get('SUPABASE_ADMIN_JWT_SECRET');
+  const serviceRoleKey = Deno.env.get('SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   if (!adminSecret || !serviceRoleKey || !supabaseUrl) {
     return jsonResponse({ error: 'Missing server secrets' }, 500);
@@ -233,14 +242,19 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'No delivery channel selected' }, 400);
   }
 
-  const emailCount = payload.sendEmail ? await (async () => {
+  let emailCount = 0;
+  if (payload.sendEmail) {
     const recipients = await getRecipientEmails(payload, serviceRoleKey);
     const html = buildAnnouncementHtml(payload.subject, payload.body);
     for (const recipient of recipients) {
-      await sendMail(recipient, payload.subject, html);
+      try {
+        await sendMail(recipient, payload.subject, html);
+        emailCount += 1;
+      } catch {
+        // Le email non devono bloccare gli altri canali.
+      }
     }
-    return recipients.length;
-  })() : 0;
+  }
 
   let pushCount = 0;
   if (payload.sendApp) {
@@ -257,7 +271,12 @@ Deno.serve(async (req) => {
       const details = await insertResponse.text();
       return jsonResponse({ error: `Failed to store notification: ${insertResponse.status} ${details}` }, 500);
     }
-    pushCount = await sendPushNotifications(payload.subject.trim(), payload.body.trim(), serviceRoleKey);
+    try {
+      pushCount = await sendPushNotifications(payload.subject.trim(), payload.body.trim(), serviceRoleKey);
+    } catch {
+      // Le push non devono impedire la notifica in-app già salvata.
+      pushCount = 0;
+    }
   }
 
   return jsonResponse({

@@ -68,14 +68,68 @@ async function supabaseFetch(path: string, serviceRoleKey: string, init?: Reques
   });
 }
 
+function escapeHtml(input: string): string {
+  return input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildRemovalEmailHtml(params: {
+  memberName: string;
+  productName: string;
+  groupName: string;
+}): string {
+  return `
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; background:#faf5ff; padding:24px;">
+      <div style="max-width:620px; margin:0 auto; background:#fff; border:1px solid #e9d5ff; border-radius:20px; overflow:hidden;">
+        <div style="background:linear-gradient(135deg,#7c3aed,#c084fc); padding:24px; color:#fff;">
+          <div style="font-size:20px; font-weight:700;">Wishlist · Regalo di gruppo</div>
+        </div>
+        <div style="padding:24px; color:#4c1d95;">
+          <h2 style="margin:0 0 12px; font-size:24px;">Ciao ${escapeHtml(params.memberName)}!</h2>
+          <p style="margin:0 0 12px;">Sei stato rimosso dal gruppo regalo per <strong>${escapeHtml(params.productName)}</strong>.</p>
+          <p style="margin:0 0 18px;">Gruppo: <strong>${escapeHtml(params.groupName || 'Gruppo regalo')}</strong></p>
+          <p style="margin:0; font-size:12px; color:#7c3aed;">Se pensi che sia un errore, contatta l’amministratore del sito.</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function sendRemovalEmail(serviceRoleKey: string, to: string, memberName: string, productName: string, groupName: string): Promise<void> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  if (!supabaseUrl) throw new Error('Missing SUPABASE_URL');
+  const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/send-mail`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      'x-client-info': 'wishlist-admin-members',
+    },
+    body: JSON.stringify({
+      to,
+      subject: `Rimozione dal gruppo regalo "${productName}"`,
+      html: buildRemovalEmailHtml({ memberName, productName, groupName }),
+    }),
+  });
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`send-mail failed: ${response.status} ${details}`);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'GET' && req.method !== 'DELETE') {
     return jsonResponse({ error: 'Method not allowed' }, 405);
   }
 
-  const adminSecret = Deno.env.get('ADMIN_JWT_SECRET');
-  const serviceRoleKey = Deno.env.get('SERVICE_ROLE_KEY');
+  const adminSecret = Deno.env.get('ADMIN_JWT_SECRET') ?? Deno.env.get('SUPABASE_ADMIN_JWT_SECRET');
+  const serviceRoleKey = Deno.env.get('SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   if (!adminSecret || !serviceRoleKey || !supabaseUrl) {
     return jsonResponse({ error: 'Missing server secrets' }, 500);
@@ -143,13 +197,29 @@ Deno.serve(async (req) => {
   }
 
   for (const memberId of memberIds) {
-    const memberResponse = await supabaseFetch(`/rest/v1/members?select=id,group_id&id=eq.${memberId}`, serviceRoleKey);
+    const memberResponse = await supabaseFetch(`/rest/v1/members?select=id,group_id,name,email&id=eq.${memberId}`, serviceRoleKey);
     if (!memberResponse.ok) {
       return jsonResponse({ error: `Failed to load member ${memberId}: ${memberResponse.status}` }, 500);
     }
-    const memberRows = await memberResponse.json() as Array<{ id: string; group_id: string }>;
+    const memberRows = await memberResponse.json() as Array<{ id: string; group_id: string; name: string; email: string }>;
     const member = memberRows[0];
     if (!member) continue;
+
+    const groupResponse = await supabaseFetch(`/rest/v1/gift_groups?select=id,product_id&id=eq.${member.group_id}`, serviceRoleKey);
+    if (!groupResponse.ok) {
+      return jsonResponse({ error: `Failed to load group ${member.group_id}: ${groupResponse.status}` }, 500);
+    }
+    const groupRows = await groupResponse.json() as Array<{ id: string; product_id: string }>;
+    const group = groupRows[0];
+    if (!group) continue;
+
+    const productResponse = await supabaseFetch(`/rest/v1/products?select=id,name&id=eq.${group.product_id}`, serviceRoleKey);
+    if (!productResponse.ok) {
+      return jsonResponse({ error: `Failed to load product ${group.product_id}: ${productResponse.status}` }, 500);
+    }
+    const productRows = await productResponse.json() as Array<{ id: string; name: string }>;
+    const product = productRows[0];
+    if (!product) continue;
 
     await supabaseFetch(`/rest/v1/members?id=eq.${memberId}`, serviceRoleKey, { method: 'DELETE' });
 
@@ -159,7 +229,21 @@ Deno.serve(async (req) => {
     }
     const remaining = await remainingResponse.json() as Array<{ id: string }>;
     if (remaining.length === 0) {
+      await supabaseFetch(
+        `/rest/v1/gift_groups?id=eq.${member.group_id}`,
+        serviceRoleKey,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ purchased: false }),
+        },
+      );
       await supabaseFetch(`/rest/v1/gift_groups?id=eq.${member.group_id}`, serviceRoleKey, { method: 'DELETE' });
+    }
+
+    try {
+      await sendRemovalEmail(serviceRoleKey, member.email, member.name, product.name, `Gruppo ${product.name}`);
+    } catch {
+      // La rimozione non deve bloccarsi se la mail non parte.
     }
   }
 

@@ -10,6 +10,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/partecipa" element={<JoinPage />} />
+        <Route path="/prodotto/:productId" element={<JoinPage />} />
         <Route path="/il-mio-gruppo" element={<MyGroupPage />} />
         <Route path="/admin" element={<AdminPage />} />
       </Routes>

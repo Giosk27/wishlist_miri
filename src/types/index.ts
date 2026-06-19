@@ -54,6 +54,7 @@ export interface JoinResult {
   member: Member;
   isNewGroup: boolean;
   pricePerPerson: number;
+  warning?: string | null;
 }
 
 export interface AppNotification {

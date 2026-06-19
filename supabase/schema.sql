@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS members (
   email TEXT NOT NULL,
   email_hash TEXT NOT NULL UNIQUE,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved')),
+  approval_token TEXT NOT NULL DEFAULT gen_random_uuid()::text,
   session_token TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT now()
 );
@@ -146,5 +147,26 @@ DROP POLICY IF EXISTS "product_images_insert" ON storage.objects;
 CREATE POLICY "product_images_insert" ON storage.objects
   FOR INSERT TO anon
   WITH CHECK (bucket_id = 'product-images');
+
+DROP POLICY IF EXISTS "product_images_service_insert" ON storage.objects;
+CREATE POLICY "product_images_service_insert" ON storage.objects
+  FOR INSERT TO service_role
+  WITH CHECK (bucket_id = 'product-images');
+
+DROP POLICY IF EXISTS "product_images_service_select" ON storage.objects;
+CREATE POLICY "product_images_service_select" ON storage.objects
+  FOR SELECT TO service_role
+  USING (bucket_id = 'product-images');
+
+DROP POLICY IF EXISTS "product_images_service_update" ON storage.objects;
+CREATE POLICY "product_images_service_update" ON storage.objects
+  FOR UPDATE TO service_role
+  USING (bucket_id = 'product-images')
+  WITH CHECK (bucket_id = 'product-images');
+
+DROP POLICY IF EXISTS "product_images_service_delete" ON storage.objects;
+CREATE POLICY "product_images_service_delete" ON storage.objects
+  FOR DELETE TO service_role
+  USING (bucket_id = 'product-images');
 
 GRANT SELECT ON members_public TO anon, authenticated, service_role;

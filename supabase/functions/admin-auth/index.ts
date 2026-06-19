@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405);
 
   const adminPassword = Deno.env.get('ADMIN_PASSWORD');
-  const adminTokenSecret = Deno.env.get('ADMIN_JWT_SECRET');
+  const adminTokenSecret = Deno.env.get('ADMIN_JWT_SECRET') ?? Deno.env.get('SUPABASE_ADMIN_JWT_SECRET');
   if (!adminPassword || !adminTokenSecret) {
     return jsonResponse({ error: 'Missing admin secrets' }, 500);
   }
