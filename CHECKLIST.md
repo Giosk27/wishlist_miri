@@ -9,7 +9,7 @@
   - [ ] `ADMIN_PASSWORD`
   - [ ] `ADMIN_JWT_SECRET`
   - [ ] `SERVICE_ROLE_KEY`
-  - [ ] `VAPID_PUBLIC_KEY`
+  - [ ] `VITE_VAPID_PUBLIC_KEY`
   - [ ] `VAPID_PRIVATE_KEY`
   - [ ] `VAPID_SUBJECT`
   - [ ] `GOOGLE_CLIENT_ID`
@@ -39,7 +39,7 @@
 - [ ] Configura `.env` / secret GitHub Pages:
   - [ ] `VITE_SUPABASE_URL`
   - [ ] `VITE_SUPABASE_ANON_KEY`
-  - [ ] `VAPID_PUBLIC_KEY`
+  - [ ] `VITE_VAPID_PUBLIC_KEY`
   - [ ] `VITE_BASE_PATH`
   - [ ] `VITE_SITE_URL`
   - [ ] `VITE_EMAIL_API_URL` solo se serve

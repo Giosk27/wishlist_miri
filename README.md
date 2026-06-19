@@ -181,7 +181,7 @@ Per l’ordine operativo usa `CHECKLIST.md`.
 
 - Creare `ADMIN_PASSWORD` e `ADMIN_JWT_SECRET` come secrets Supabase.
 - Tenere `SERVICE_ROLE_KEY` solo lato server.
-- Tenere `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` e `VAPID_SUBJECT` come secrets Supabase.
+- Tenere `VITE_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` e `VAPID_SUBJECT` come secrets Supabase.
 - Deployare `admin-auth`, `admin-broadcast` e `push-subscriptions`.
 - Verificare che `products`, `gift_groups`, `members`, `app_notifications`, `push_subscriptions` abbiano RLS attive.
 - Spostare eventuali operazioni distruttive o sensibili dentro Edge Functions.
@@ -223,12 +223,12 @@ Il pannello admin attuale può già inviare:
 - `ADMIN_JWT_SECRET`
 - `SUPABASE_URL`
 - `SERVICE_ROLE_KEY`
-- `VAPID_PUBLIC_KEY`
+- `VITE_VAPID_PUBLIC_KEY`
 - `VAPID_PRIVATE_KEY`
 - `VAPID_SUBJECT`
 
 La variabile `VITE_ADMIN_PASSWORD` resta utile solo per la modalità demo locale, non per il deploy pubblico.
-Per le push PWA serve anche `VAPID_PUBLIC_KEY` nel build frontend.
+Per le push PWA serve anche `VITE_VAPID_PUBLIC_KEY` nel build frontend.
 
 ### Nota importante su "crittatura"
 
