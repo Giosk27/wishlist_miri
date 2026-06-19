@@ -31,6 +31,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const isStandalone =
     typeof window !== 'undefined' &&
     window.matchMedia('(display-mode: standalone)').matches;
+  const pushRequirementsMessage = isIos && !isStandalone
+    ? 'Su iPhone apri il sito dalla schermata Home e poi prova di nuovo ad attivare le notifiche.'
+    : '';
+  const canRequestPush =
+    !!authUser &&
+    !pushLoading &&
+    !(isIos && !isStandalone) &&
+    typeof Notification !== 'undefined' &&
+    Notification.permission !== 'denied';
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
@@ -65,6 +74,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (typeof Notification === 'undefined') return;
+    setPermissionState(Notification.permission);
   }, [location.pathname]);
 
   useEffect(() => {
@@ -114,7 +128,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       setPushMessage('Accedi da “Il mio gruppo” per attivare le notifiche push.');
       return;
     }
+    if (isIos && !isStandalone) {
+      setPushMessage('Su iPhone apri il sito dalla schermata Home e poi prova di nuovo ad attivare le notifiche.');
+      return;
+    }
     if (typeof Notification === 'undefined') {
+      setPushMessage('Questo browser non supporta le notifiche push.');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      setPushMessage('Le notifiche sono bloccate: apri le impostazioni di iPhone e riattivale per il sito.');
       return;
     }
 
@@ -124,8 +147,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       setPushSubscribed(true);
       setPermissionState(Notification.permission);
       setPushMessage('Notifiche push attive.');
-    } catch {
-      setPushMessage('Non è stato possibile attivare le notifiche push.');
+    } catch (error) {
+      setPushMessage(
+        error instanceof Error && error.message
+          ? `Non è stato possibile attivare le notifiche push: ${error.message}`
+          : 'Non è stato possibile attivare le notifiche push.',
+      );
     } finally {
       setPushLoading(false);
     }
@@ -175,7 +202,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               {!pushSubscribed && (
                 <div className="flex flex-col gap-2">
                   <button
-                    disabled={pushLoading || !authUser}
+                    disabled={!canRequestPush}
                     onClick={enableNotifications}
                     className="self-start rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
                   >
@@ -190,9 +217,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 Per attivare le notifiche push devi prima accedere dalla sezione “Il mio gruppo”.
               </p>
             )}
-            {isIos && !isStandalone && permissionState !== 'granted' && (
+            {permissionState === 'denied' && (
+              <p className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+                Le notifiche sono bloccate per questo sito: apri le impostazioni di iPhone e consenti le notifiche, poi riapri la web app.
+              </p>
+            )}
+            {pushRequirementsMessage && permissionState !== 'granted' && (
               <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                Per un’esperienza ottimale su iPhone, aggiungi la pagina alla schermata Home e riaprila da lì.
+                {pushRequirementsMessage}
               </p>
             )}
             <div className="mt-4 grid gap-3">

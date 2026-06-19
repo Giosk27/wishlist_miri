@@ -25,6 +25,9 @@ export async function subscribeToPushNotifications(): Promise<boolean> {
   if (!isSupabaseConfigured) {
     throw new Error('Supabase non configurato.');
   }
+  if (!window.isSecureContext) {
+    throw new Error('Le notifiche push richiedono una connessione HTTPS.');
+  }
 
   const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
   if (!vapidPublicKey) {
