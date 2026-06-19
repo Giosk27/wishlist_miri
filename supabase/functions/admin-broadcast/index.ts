@@ -168,11 +168,11 @@ async function deletePushSubscription(endpoint: string, serviceRoleKey: string):
 }
 
 async function sendPushNotifications(subject: string, body: string, serviceRoleKey: string): Promise<number> {
-  const vapidPublicKey = Deno.env.get('VITE_VAPID_PUBLIC_KEY');
+  const vapidPublicKey = Deno.env.get('VAPID_PUBLIC_KEY');
   const vapidPrivateKey = Deno.env.get('VAPID_PRIVATE_KEY');
   const vapidSubject = Deno.env.get('VAPID_SUBJECT') ?? 'mailto:admin@example.com';
   if (!vapidPublicKey || !vapidPrivateKey) {
-    throw new Error('Missing VITE_VAPID_PUBLIC_KEY or VAPID_PRIVATE_KEY');
+    throw new Error('Missing VAPID_PUBLIC_KEY or VAPID_PRIVATE_KEY');
   }
 
   webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);

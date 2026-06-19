@@ -18,6 +18,21 @@ function getSubscriptionUrl(): string | null {
   return `${supabaseUrl.replace(/\/$/, '')}/functions/v1/push-subscriptions`;
 }
 
+function getVapidPublicKey(): string {
+  const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
+  if (vapidPublicKey) return vapidPublicKey;
+
+  if (import.meta.env.PROD) {
+    throw new Error(
+      'Manca VITE_VAPID_PUBLIC_KEY',
+    );
+  }
+
+  throw new Error(
+    'Manca VITE_VAPID_PUBLIC_KEY nel file .env.local/.env. Aggiungila, salva il file e riavvia il server di sviluppo.',
+  );
+}
+
 export async function subscribeToPushNotifications(): Promise<boolean> {
   if (!('serviceWorker' in navigator) || !('PushManager' in window) || typeof Notification === 'undefined') {
     throw new Error('Il browser non supporta le notifiche push.');
@@ -29,10 +44,7 @@ export async function subscribeToPushNotifications(): Promise<boolean> {
     throw new Error('Le notifiche push richiedono una connessione HTTPS.');
   }
 
-  const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
-  if (!vapidPublicKey) {
-    throw new Error('Manca VITE_VAPID_PUBLIC_KEY.');
-  }
+  const vapidPublicKey = getVapidPublicKey();
 
   const permission = Notification.permission === 'granted'
     ? 'granted'

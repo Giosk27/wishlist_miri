@@ -9,7 +9,7 @@
   - [ ] `ADMIN_PASSWORD`
   - [ ] `ADMIN_JWT_SECRET`
   - [ ] `SERVICE_ROLE_KEY`
-  - [ ] `VITE_VAPID_PUBLIC_KEY`
+  - [ ] `VAPID_PUBLIC_KEY`
   - [ ] `VAPID_PRIVATE_KEY`
   - [ ] `VAPID_SUBJECT`
   - [ ] `GOOGLE_CLIENT_ID`
