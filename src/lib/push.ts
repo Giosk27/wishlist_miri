@@ -29,9 +29,9 @@ export async function subscribeToPushNotifications(): Promise<boolean> {
     throw new Error('Le notifiche push richiedono una connessione HTTPS.');
   }
 
-  const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
+  const vapidPublicKey = import.meta.env.VAPID_PUBLIC_KEY as string | undefined;
   if (!vapidPublicKey) {
-    throw new Error('Manca VITE_VAPID_PUBLIC_KEY.');
+    throw new Error('Manca VAPID_PUBLIC_KEY.');
   }
 
   const permission = Notification.permission === 'granted'

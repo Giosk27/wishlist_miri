@@ -228,7 +228,7 @@ Il pannello admin attuale può già inviare:
 - `VAPID_SUBJECT`
 
 La variabile `VITE_ADMIN_PASSWORD` resta utile solo per la modalità demo locale, non per il deploy pubblico.
-Per le push PWA serve anche `VITE_VAPID_PUBLIC_KEY` nel build frontend.
+Per le push PWA serve anche `VAPID_PUBLIC_KEY` nel build frontend.
 
 ### Nota importante su "crittatura"
 
